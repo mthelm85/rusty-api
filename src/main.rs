@@ -1,49 +1,44 @@
+use actix_cors::Cors;
 use actix_web::{ get, web, App, HttpResponse, HttpServer, Responder };
+use anyhow::Result;
 use mongodb::{ Client, Database, bson::doc, options::ClientOptions };
-use serde::{ Deserialize, Serialize };
+
+mod types;
 
 #[derive(Debug, Clone)]
-struct AppState {
+pub struct AppState {
     pub db: Database,
     pub client: Client
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct Naic {
-    code: u32,
-    title: String,
-}
-
-#[derive(Deserialize)]
-struct Info {
-    code: u32
-}
-
-#[get("/search/{code}")]
-async fn search(data: web::Data<AppState>, info: web::Path<Info>) -> impl Responder {
-    let collection = data.db.collection::<Naic>("Descriptions");
-    match collection.find_one(doc! { "Code": info.code }, None).await {
-        Ok(naic) => {
-            match naic {
-                Some(code) => HttpResponse::Ok().body(format!("Description: {}", code.title)),
-                None => HttpResponse::Ok().body("NAIC not found")
+#[get("/county/{fips}")]
+async fn search(data: web::Data<AppState>, info: web::Path<types::Info>) -> impl Responder {
+    let collection = data.db.collection::<types::County>("counties");
+    let filter = doc! { "fips": info.fips.clone() };
+    // let options = FindOneOptions::builder().projection(doc! { "place_name": true }).build();
+    match collection.find_one(filter, None).await {
+        Ok(county) => {
+            match county {
+                Some(c) => HttpResponse::Ok().json(types::Response { data: Some(c) }),
+                None => HttpResponse::Ok().json(types::Response { data: None })
+                // Some(c) => HttpResponse::Ok().json(web::Json(types::Response { data: Some(c) })),
+                // None => HttpResponse::Ok().json(web::Json(types::Response { data: None }))
             }
         },
-        Err(e) => HttpResponse::Ok().body(format!("Error: {}", e))
+        Err(_e) => HttpResponse::InternalServerError().finish()
     }
-    
 }
 
 #[actix_web::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> { 
+async fn main() -> Result<()> { 
     let client_options = ClientOptions::parse("mongodb://127.0.0.1:27017/").await?;
     let client = Client::with_options(client_options)?;
-    let db = client.database("NAICS");
+    let db = client.database("labor-data");
     let state = AppState { db, client };
     HttpServer::new(move || {
         App::new()
-            .app_data(state.clone())
+            .wrap(Cors::permissive())
+            .data(state.clone())
             .service(search)
     })
         .bind("127.0.0.1:8080")?
