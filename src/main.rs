@@ -1,3 +1,5 @@
+use std::env;
+
 use actix_cors::Cors;
 use actix_web::{ get, web, App, HttpResponse, HttpServer, Responder };
 use anyhow::Result;
@@ -21,8 +23,6 @@ async fn search(data: web::Data<AppState>, info: web::Path<types::Info>) -> impl
             match county {
                 Some(c) => HttpResponse::Ok().json(types::Response { data: Some(c) }),
                 None => HttpResponse::Ok().json(types::Response { data: None })
-                // Some(c) => HttpResponse::Ok().json(web::Json(types::Response { data: Some(c) })),
-                // None => HttpResponse::Ok().json(web::Json(types::Response { data: None }))
             }
         },
         Err(_e) => HttpResponse::InternalServerError().finish()
@@ -31,7 +31,10 @@ async fn search(data: web::Data<AppState>, info: web::Path<types::Info>) -> impl
 
 #[actix_web::main]
 async fn main() -> Result<()> { 
-    let client_options = ClientOptions::parse("mongodb://127.0.0.1:27017/").await?;
+    let mongouri = env::var("MONGODB_URI").unwrap_or("mongodb://127.0.0.1:27017/".to_string());
+    let host = env::var("HOST").unwrap_or("127.0.0.1".to_string());
+    let port = env::var("PORT").unwrap_or("8080".to_string());
+    let client_options = ClientOptions::parse(mongouri).await?;
     let client = Client::with_options(client_options)?;
     let db = client.database("labor-data");
     let state = AppState { db, client };
@@ -41,7 +44,7 @@ async fn main() -> Result<()> {
             .data(state.clone())
             .service(search)
     })
-        .bind("127.0.0.1:8080")?
+        .bind(format!("{}:{}", host, port))?
         .run()
         .await?;
     Ok(())
